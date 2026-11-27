@@ -38,7 +38,7 @@ cd examples
 make                 convert every .c to Lean and run the acceptance checks
 make STRICT=1        same, but specs without a proof fail the build
 make gen             per-example Lean files only (into build/)
-make check PROG=fact regenerate, elaborate and audit one example standalone
+make check PROG=fact regenerate and elaborate one example standalone
 make lint            validate inputs without writing anything
 make calibrate       MCJIT cross-check against real machine code
 make clean           remove everything generated
