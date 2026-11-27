@@ -37,6 +37,7 @@ pick it up automatically.
 cd examples
 make                 translate every .c to Lean, build, print the axiom audit
 make gen             only write the generated Lean (into build/)
+make proofs          only regenerate the Proofs.lean aggregator
 make clean           remove everything generated
 ```
 The audit lists each spec: `AUDIT <name>` with the axioms its proof uses,
