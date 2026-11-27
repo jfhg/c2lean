@@ -1,42 +1,39 @@
 #!/usr/bin/env python3
 """c2lean.py — the C/LLVM frontend: translate C (or LLVM IR) into Lean.
 
-Accepts `.c` files (compiled internally with clang, IR kept in a temp
-dir — the C source is the input of record) and/or `.ll` files directly
-(for hand-written IR).  Emits one Lean file: ASTs, modules, the linked
-`projectM`, global memory `projectG`, and spec skeletons for every
-`//@` spec found in the source.
+The unit of translation is a LINKED PROJECT: pass every file that must
+be seen together (cross-file calls, shared globals) and get exactly one
+Lean file.  A single file is a project of one.
 
-Reads LLVM IR files, verifies them (via llvmlite/LLVM itself), and emits
-two Lean files:
+    c2lean.py -o combined.lean a.c b.c              # two-file project
+    c2lean.py -o fact.lean fact.c                   # project of one
+    c2lean.py examples/*.c -o build/C2Lean/Programs.lean   # what `make` does
 
-    <outdir>/LlPrograms.lean    one `Func` per definition, one `Module`
-                                per file, plus the linked `projectM` and
-                                the global memory `projectG`
-    <outdir>/Specs_gen.lean     theorem skeletons for every `//@` spec
-                                found in the matching c/<stem>.c
+The output file contains:
+  * one `Func` AST per defined function, one `Module` per input file;
+  * `projectM` — the static link of all modules (the interpreter's
+    universe: cross-file calls resolve through it);
+  * `projectG` — initial memory with linker-assigned global addresses;
+  * one `def <fn>_cspec_type : Prop` per `//@` spec in the sources.
 
-Usage:
-    c2lean.py [OPTIONS] FILE.c|FILE.ll ...
+Inputs are `.c` files (compiled internally with clang — the C source is
+the input of record, IR is ephemeral) and/or `.ll` files (hand-written
+IR).
 
 Options:
-    -o DIR      output directory (default: C2Lean)
-    --check     linter mode: validate inputs and verify the generated
-                files are up to date; write nothing.  Exit 0 = clean,
-                non-zero = bad input or stale output.
+    -o FILE     output file (default: C2Lean/Programs.lean); `-o -`
+                writes to a fresh temp dir and prints the path on
+                stdout (status messages go to stderr)
+    --check     linter mode: validate inputs + verify generated files
+                are fresh; write nothing.  Exit 0 = clean, non-zero =
+                bad input or stale output.
     -h, --help  show this help
-
-Examples:
-    c2lean.py c/*.c                           # C is the input (clang runs for you)
-    c2lean.py examples/*.c                       # or feed IR directly
-    c2lean.py --check c/*.c                   # CI gate
-    c2lean.py -o out.lean test.c              # translate one file anywhere
 
 Behavior contract (a trusted translator):
   * Deterministic: same inputs -> byte-identical outputs.
   * Fail-closed: anything outside the supported subset aborts with a
     message on stderr and a non-zero exit code; nothing is guessed.
-  * All-or-nothing: either both output files are written, or neither.
+  * All-or-nothing: either the output is written, or nothing is.
 
 llvmlite gives structured access to functions, blocks, opcodes and
 operands; a few things (icmp predicates, branch/phi labels, global
@@ -510,7 +507,7 @@ def main():
                     help="C sources (compiled with clang -O0) and/or LLVM IR "
                          "files — the whole linked project")
     ap.add_argument("-o", metavar="FILE", default=None, dest="out",
-                    help="output file (default: examples/build/C2Lean/Programs.lean)")
+                    help="output file (default: C2Lean/Programs.lean)")
     ap.add_argument("--check", action="store_true",
                     help="linter mode: validate inputs + verify generated "
                          "files are fresh; write nothing, exit non-zero on "
