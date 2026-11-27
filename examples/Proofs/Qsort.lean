@@ -888,20 +888,19 @@ theorem permAt_of_perm (m m₀ : Mem) (a n : Nat) (h : (segN m a 0 n).Perm (segN
 theorem sort_cspec : sort_cspec_type := by
   intro c_a c_n m₀ hpre
   -- §1 showed the original precondition was missing hypotheses; the spec
-  -- comment in qsort.c now carries all four.  Extract them with term-mode
-  -- Bool lemmas (`&&` is left-associative: ((A && B) && C) && D).
-  have hall : (validAt c_a c_n && c_n ≤ 8 && 1024 ≤ m₀.next &&
+  -- comment in qsort.c now carries them.  Extract with term-mode Bool
+  -- lemmas (`&&` is left-associative: (A && B) && C).
+  -- (The original spec also carried `c_n <= 8`; it was dead weight —
+  --  `validAt` already forces `c_n ≤ 256`, and the proof only ever needs
+  --  `c_n < 2^31` so the loop bound `hi = c_n − 1` is positive under the
+  --  program's signed comparisons.)
+  have hall : (validAt c_a c_n && 1024 ≤ m₀.next &&
                SmallAt (fun p => Mem.get m₀ p) c_a c_n) = true := by
     simpa using hpre
   obtain ⟨h1, hsmallb⟩ := Bool.and_eq_true_iff.mp hall
-  obtain ⟨h2, hnextd⟩ := Bool.and_eq_true_iff.mp h1
-  obtain ⟨hva, hn8d⟩ := Bool.and_eq_true_iff.mp h2
+  obtain ⟨hva, hnextd⟩ := Bool.and_eq_true_iff.mp h1
   have hnext : 1024 ≤ m₀.next := of_decide_eq_true hnextd
-  have hn8 : c_n ≤ 8 := of_decide_eq_true hn8d
-  have hv : c_a + 4 * c_n ≤ 1024 ∧ c_n ≤ 8 := by
-    constructor
-    · simpa [validAt] using hva
-    · exact hn8
+  have hva' : c_a + 4 * c_n ≤ 1024 := by simpa [validAt] using hva
   have hsmall : ∀ i, i < c_n → getAt (fun p => Mem.get m₀ p) c_a i < 2147483648 :=
     fun i hi => Spec.smallAt_bound hsmallb i hi
   let P : Config → Prop := fun d => ∃ m', stepOne projectM d = StepR.fin 0 m' ∧

@@ -47,7 +47,7 @@ void quickSort(int arr[], int low, int high) {
     }
 }
 
-//@ requires validAt c:a c:n && c:n <= 8 && 1024 <= m₀.next && SmallAt old c:a c:n;
+//@ requires validAt c:a c:n && 1024 <= m₀.next && SmallAt old c:a c:n;
 //@ ensures  SortedAt cur c:a c:n && PermAt cur old c:a c:n;
 void sort(int *a, int n) {
     if (n > 0) quickSort(a, 0, n - 1);
