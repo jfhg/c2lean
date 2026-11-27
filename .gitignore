@@ -1,0 +1,7 @@
+# build artifacts
+.lake/
+__pycache__/
+examples/build/
+
+# generated aggregator (see examples/Makefile)
+examples/Proofs.lean

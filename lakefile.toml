@@ -1,0 +1,24 @@
+name = "c2lean"
+version = "0.1.0"
+defaultTargets = ["C2Lean", "Generated", "Examples"]
+
+[[lean_lib]]
+name = "C2Lean"
+
+[[lean_lib]]
+name = "Generated"
+srcDir = "examples/build"
+roots = ["C2Lean.Programs"]
+
+# MCJIT ground-truth calibration module; only exists after `make calibrate`,
+# so it is deliberately NOT in defaultTargets.
+[[lean_lib]]
+name = "Calibrate"
+srcDir = "examples/build"
+roots = ["C2Lean.McjitCheck"]
+
+[[lean_lib]]
+name = "Examples"
+srcDir = "examples"
+roots = ["Proofs"]
+globs = ["Proofs"]
