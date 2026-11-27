@@ -90,6 +90,10 @@ RE_CAST = re.compile(
 RE_SMINMAX = re.compile(
     r"^(%[-\w.]+) = (?:tail )?call i32 @llvm\.s(min|max)\.i32\("
     r"i32 (%[-\w.]+|@[-\w.]+|-?\d+), i32 (%[-\w.]+|@[-\w.]+|-?\d+)\)$")
+# Call sites collected during translation: every callee must be a function
+# DEFINED somewhere in the linked project (checked once all files are in).
+# External/printf calls would only fail at machine run time -- fail here.
+CALL_TARGETS = []
 
 # Global variables: name -> address, assigned in the pre-pass over all
 # files (like a linker laying out .data).  Region: >= 1048576, safely
@@ -326,9 +330,17 @@ def convert_function(f):
             elif i.opcode == "ret":
                 term = "(Ll.Term.retv)"   # `ret void`
             elif i.opcode == "call":
-                callee = list(i.operands)[-1].name
+                op = list(i.operands)[-1]
+                # An indirect call has a register/codeptr operand, not a
+                # function.  The machine has no function pointers; translating
+                # one to a bogus name would fail only at run time -- reject
+                # here (fail-closed).
+                if op.value_kind.name != "function":
+                    sys.exit(f"indirect call not supported: {txt}")
+                callee = op.name
                 if callee.startswith("llvm."):
                     sys.exit(f"unsupported intrinsic call: {txt}")
+                CALL_TARGETS.append((callee, txt))
                 args = ", ".join(operand(o) for o in list(i.operands)[:-1])
                 if str(i.type) == "void":
                     instrs.append(f'  Ll.Instr.callv "{callee}" [{args}]')
@@ -350,6 +362,14 @@ def convert_function(f):
 
 RE_SPEC = re.compile(r"//@\s*(requires|ensures|modifies)\s+(.*?)\s*;?\s*$")
 RE_FUNC = re.compile(r"^([A-Za-z_]\w*\s+)+\*?\s*(\w+)\s*\(([^)]*)\)\s*\{")
+# `__attribute__((...))` between the return type and the name breaks the
+# one-line signature pattern; strip it before matching.
+RE_ATTR = re.compile(r"__attribute__\s*\(\(.*?\)\)")
+# A column-0 line that looks like a function definition (used to detect
+# "spec pending but the signature did not parse" -- silent misattribution
+# of a spec to the NEXT function is the failure mode being prevented).
+RE_FUNC_LOOSE = re.compile(r"^\w[\w\s\*]*\w\s*\(.*\)\s*(\{.*)?$")
+NON_FUNC_WORDS = {"if", "while", "for", "switch", "return", "else", "do"}
 
 # Spec-language discipline: C variables/params are written `c:<name>` in
 # spec text and bound as `c_<name>` in Lean.  Bare names are reserved for
@@ -377,25 +397,53 @@ def param_names(arglist, fname):
 def parse_c(path):
     """Collect (fname, params, {requires|ensures|modifies}) in source order."""
     specs, pending = [], {}
-    for line in open(path):
-        m = RE_SPEC.search(line)
+    for raw in open(path):
+        m = RE_SPEC.search(raw)
         if m:
             key, val = m.group(1), m.group(2)
-            pending[key] = (pending.get(key, "") + " " + val).strip()
+            pending.setdefault(key, []).append(val)
             continue
+        line = RE_ATTR.sub("", raw)
+        if line != raw:
+            # attribute stripping can leave a leading space; the signature
+            # is a column-0 definition (attributes only appear on those)
+            line = line.lstrip()
         m = RE_FUNC.match(line)
         if m and pending:
-            specs.append((m.group(2), param_names(m.group(3), m.group(2)), dict(pending)))
+            # Multiple `requires` (or `ensures`) lines are conjunctions.
+            # Joining with a bare space once produced `SumAt old c_a c_n < 5`
+            # -- which type-checks and means something else entirely.
+            sp = {k: ("(" + ") && (".join(v) + ")") if len(v) > 1 else v[0]
+                  for k, v in pending.items()}
+            specs.append((m.group(2), param_names(m.group(3), m.group(2)), sp))
             pending = {}
+        elif pending and line.split() and \
+                line.split()[0] not in NON_FUNC_WORDS and \
+                RE_FUNC_LOOSE.match(line):
+            sys.exit(f"{path}: spec pending but unparseable function "
+                     f"signature (spec would silently attach to the next "
+                     f"function): {raw.strip()}")
     if pending:
         sys.exit(f"{path}: spec comment not followed by a parseable function "
                  f"definition (unsupported signature?): {pending}")
     return specs
 
-def emit_specs(out, cpath, mod, specs):
+def emit_specs(out, cpath, mod, specs, ir_params):
     import os
     names = []
     for fname, params, sp in specs:
+        # The spec skeleton runs `runModule` with the C parameter list;
+        # if the compiled function has a different arity the arguments
+        # bind to the wrong parameters (clang drops unused parameters of
+        # static functions at -O1).  Never emit a misapplied skeleton.
+        if fname not in ir_params:
+            sys.exit(f"{fname}: spec present but no compiled function "
+                     f"`{fname}` in the IR (optimized away? name mismatch?)")
+        if len(ir_params[fname]) != len(params):
+            sys.exit(f"{fname}: spec lists {len(params)} parameter(s) {params} "
+                     f"but the compiled function has "
+                     f"{len(ir_params[fname])} {ir_params[fname]} "
+                     f"(clang drops unused parameters of static functions)")
         req = sp.get("requires", "True")
         ens = sp.get("ensures", "True")
         # `c:<name>` is the ONLY way spec text refers to C variables:
@@ -546,6 +594,7 @@ def main():
     nspecs = 0
     audit_names = []
     defined, module_names = {}, []
+    ir_params = {}                       # fname -> [param names] from the IR
     texts = {ll: open(ll).read() for ll, _, _ in inputs}
     for ll, _, label in inputs:         # pass 1: lay out globals
         globals_prepass(label, texts[ll])
@@ -557,6 +606,7 @@ def main():
             if f.is_declaration:
                 continue
             params, blocks = convert_function(f)
+            ir_params[f.name] = params
             pl = ", ".join(f'"{p}"' for p in params)
             prog.append(f"def {f.name}F : Func where")
             prog.append(f"  params := [{pl}]")
@@ -592,7 +642,15 @@ def main():
         if cpath:
             specs = parse_c(cpath)
             nspecs += len(specs)
-            audit_names += emit_specs(spec_out, cpath, f"{stem}M", specs)
+            audit_names += emit_specs(spec_out, cpath, f"{stem}M", specs,
+                                      ir_params)
+
+    # Cross-file link check: every call target must be defined in the
+    # project (this is where `printf` and friends die).
+    for callee, txt in CALL_TARGETS:
+        if callee not in defined:
+            sys.exit(f"call to undefined function `{callee}` (external calls "
+                     f"are not supported): {txt}")
 
     if GLOBALS:
         prog.append("/-- Global variable addresses (linker layout). -/")
