@@ -22,7 +22,7 @@ It assumes memory safety in its execution model.
 
 ```
 C source + //@ specs  ──c2lean.py──  Lean statements  ──kernel──  proofs
-        make check:   regen + lake build + axiom audit
+        make:   regen + lake build + axiom audit
 ```
 
 ## Using it
@@ -35,14 +35,12 @@ The Lean toolchain version is pinned in `lean-toolchain`; `elan`/`lake`
 pick it up automatically.
 ```
 cd examples
-make                 convert every .c to Lean and run the acceptance checks
-make STRICT=1        same, but specs without a proof fail the build
-make gen             per-example Lean files only (into build/)
-make check PROG=fact regenerate and elaborate one example standalone
-make lint            validate inputs without writing anything
-make calibrate       MCJIT cross-check against real machine code
+make                 translate every .c to Lean, build, print the axiom audit
+make gen             only write the generated Lean (into build/)
 make clean           remove everything generated
 ```
+The audit lists each spec: `AUDIT <name>` with the axioms its proof uses,
+or `AUDIT-MISSING <name>` when no proof exists yet.
 
 ## Handing a spec to a prover
 
