@@ -613,23 +613,47 @@ def main():
                "namespace C2Lean\nopen Ll Spec\n\n"
                + "\n".join(prog) + "\n"
                + "\n".join(spec_out) + "\nend C2Lean\n")
-    # Axiom audit: one `#print axioms`-style check per spec proof, run in a
-    # single elaboration.  `lake env lean examples/build/C2Lean/Audit.lean` prints one AUDIT
-    # line per proof; `make check` fails the build on `sorryAx` and reports
-    # unproven specs as AUDIT-MISSING.
+    # The audit is a *gate*, not a report.  For every spec proof constant it
+    # checks, inside the kernel-fed metaprogram:
+    #   1. the proof exists (else AUDIT-MISSING, informational);
+    #   2. its TYPE is definitionally the generated `<fn>_cspec_type`
+    #      (a proof of `True` under the right name is not a proof of the spec);
+    #   3. its axiom set is contained in {propext, Classical.choice, Quot.sound}
+    #      -- so `sorryAx` fails, and so does `native_decide` (Lean.ofReduceBool),
+    #      and any user-declared axiom (e.g. `axiom cheat : False`).
+    # Any violation makes this file elaboration FAIL (exit != 0), so the
+    # Makefile gate trips without grepping output for anything.
     audtxt = ("-- GENERATED axiom audit -- do not edit; run: "
               "lake env lean examples/build/C2Lean/Audit.lean\n"
               "import Lean\nimport Proofs\n\n"
               "open Lean Elab Command in\n"
               "#eval show CommandElabM Unit from do\n"
-              "  let specs : Array Name := #[" +
+              "  let allowed : List Name := [``propext, ``Classical.choice, ``Quot.sound]\n"
+              "  let proofs : Array Name := #[" +
               ", ".join(f"`C2Lean.{n}" for n in audit_names) + "]\n"
-              "  for nm in specs do\n"
+              "  let mut bad : Array String := #[]\n"
+              "  for nm in proofs do\n"
               "    match (\u2190 getEnv).find? nm with\n"
               "    | none => logInfo s!\"AUDIT-MISSING {nm} (no proof yet)\"\n"
-              "    | some _ =>\n"
-              "        let ax \u2190 liftCoreM (Lean.collectAxioms nm)\n"
-              "        logInfo s!\"AUDIT {nm}: {ax.toList}\"\n")
+              "    | some ci =>\n"
+              "        let tyName := match nm with\n"
+              "          | .str p s => .str p (s ++ \"_type\")\n"
+              "          | nm => nm\n"
+              "        if !(\u2190 getEnv).contains tyName then\n"
+              "          bad := bad.push s!\"{nm}: no spec constant {tyName}\"\n"
+              "        else\n"
+              "          let okType \u2190 liftTermElabM\n"
+              "            (Lean.Meta.isDefEq ci.type (mkConst tyName))\n"
+              "          let ax \u2190 liftCoreM (Lean.collectAxioms nm)\n"
+              "          let off := ax.toList.filter fun a => !allowed.contains a\n"
+              "          if !okType then\n"
+              "            bad := bad.push s!\"{nm}: TYPE MISMATCH (proof states something other than {tyName})\"\n"
+              "          else if !off.isEmpty then\n"
+              "            bad := bad.push s!\"{nm}: disallowed axioms {off}\"\n"
+              "          else\n"
+              "            logInfo s!\"AUDIT {nm}: {ax.toList}\"\n"
+              "  unless bad.isEmpty do\n"
+              "    throwError (\"AUDIT FAILED:\\n\" ++ String.intercalate \"\\n\" (bad.toList))\n")
     auditpath = os.path.join(os.path.dirname(out) or ".", "Audit.lean")
     targets = [(out, progtxt), (auditpath, audtxt)]
     if check:
