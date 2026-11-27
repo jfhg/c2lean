@@ -20,10 +20,11 @@ import C2Lean.Programs
   compiled code.  The `-O0` slot-machine run of the 9-vertex example
   takes ~50k steps (fuel 100000 suffices for every `V <= 15`).
 
-  The *general* correctness statement (dist = shortest-path distance for
-  every `V` and every admissible graph, via a walk-minimum
-  characterization) is the stretch mountain; a self-contained statement
-  kit exists separately for a prover to attack.
+  The *general* correctness theorem (for every `1 <= V <= 15` and every
+  admissible graph, via a walk-minimum characterization) is proved in
+  `Proofs/Dij*.lean` (statement vocabulary in `DijkstraSpec.lean`);
+  `DijkstraSpec.lean` also documents, with a proved counterexample in
+  `DijCounter.lean`, why the naive statement is false.
 -/
 
 set_option maxRecDepth 400000
