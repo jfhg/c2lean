@@ -1,4 +1,4 @@
-import Proofs.Calls
+import C2Lean.Programs
 
 /-!
   # DFCC-style sorting specification for the compiled `quickSort`
@@ -20,6 +20,16 @@ set_option maxRecDepth 1000000
 set_option maxHeartbeats 400000000
 
 namespace C2Lean
+open Ll
+
+/-- Memory holding array `l` at addresses 0, 4, 8, … -/
+def carrMem (l : List Nat) : Mem :=
+  { cells := List.map (fun p => (4*p.1, p.2)) ((List.range l.length).zip l), next := 1024 }
+
+/-- Read back `n` array words from memory. -/
+def carrGet (m : Mem) (n : Nat) : List Nat := (List.range n).map (fun i => m.get (4*i))
+
+def cfinMem (r : Res) : Mem := match r with | Res.val _ m => m | _ => Mem.empty
 open Ll
 
 /-- Adjacent order, computably. -/
